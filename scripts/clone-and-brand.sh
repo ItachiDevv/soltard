@@ -1,67 +1,167 @@
 #!/usr/bin/env bash
 # clone-and-brand.sh — Clone agave and apply soltard branding
 # Usage: ./scripts/clone-and-brand.sh [agave-tag]
+#
+# This script:
+#   1. Clones agave at a pinned tag
+#   2. Renames key binaries from solana-*/agave-* to soltard-*
+#   3. Patches the config directory path (.config/solana -> .config/soltard)
+#   4. Patches version/branding strings
+#
+# The result is a buildable soltard fork with a unique identity.
 set -euo pipefail
 
 AGAVE_REPO="https://github.com/anza-xyz/agave.git"
 AGAVE_TAG="${1:-v2.2.6}"
-SOLTARD_DIR="$(cd "$(dirname "$0")/.." && pwd)/agave-fork"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SOLTARD_DIR="${SCRIPT_DIR}/../agave-fork"
 
-echo "==> Cloning agave ${AGAVE_TAG} into ${SOLTARD_DIR}..."
+echo "========================================="
+echo " soltard clone-and-brand"
+echo " Source: agave ${AGAVE_TAG}"
+echo "========================================="
+echo ""
+
+# --- Step 1: Clone ---
+echo "==> [1/5] Cloning agave ${AGAVE_TAG}..."
 if [ -d "$SOLTARD_DIR" ]; then
-    echo "    Directory exists, skipping clone"
+    echo "    Directory ${SOLTARD_DIR} exists, skipping clone"
+    echo "    (Delete it and re-run to start fresh)"
 else
     git clone --depth 1 --branch "$AGAVE_TAG" "$AGAVE_REPO" "$SOLTARD_DIR"
 fi
 
 cd "$SOLTARD_DIR"
 
-echo "==> Renaming binaries in Cargo.toml files..."
-# Rename key binary targets from solana-* to soltard-*
-BINS_TO_RENAME=(
-    "validator/Cargo.toml:solana-validator:soltard-validator"
-    "genesis/Cargo.toml:solana-genesis:soltard-genesis"
-    "faucet/Cargo.toml:solana-faucet:soltard-faucet"
-    "keygen/Cargo.toml:solana-keygen:soltard-keygen"
-    "ledger-tool/Cargo.toml:solana-ledger-tool:soltard-ledger-tool"
-    "cli/Cargo.toml:solana:soltard"
+# --- Step 2: Rename binaries ---
+echo ""
+echo "==> [2/5] Renaming binaries in Cargo.toml files..."
+
+# In agave v2.2.6, some binaries are already "agave-*", some are "solana-*"
+# We rename all to "soltard-*"
+declare -A BINARY_RENAMES=(
+    # file:old_name -> new_name
+    ["validator/Cargo.toml"]="agave-validator:soltard-validator"
+    ["genesis/Cargo.toml"]="solana-genesis:soltard-genesis"
+    ["faucet/Cargo.toml"]="solana-faucet:soltard-faucet"
+    ["keygen/Cargo.toml"]="solana-keygen:soltard-keygen"
+    ["ledger-tool/Cargo.toml"]="agave-ledger-tool:soltard-ledger-tool"
+    ["test-validator/Cargo.toml"]="solana-test-validator:soltard-test-validator"
 )
 
-for entry in "${BINS_TO_RENAME[@]}"; do
-    IFS=: read -r file old new <<< "$entry"
+# The CLI binary (cli/Cargo.toml) has [[bin]] name = "solana"
+BINARY_RENAMES["cli/Cargo.toml"]="solana:soltard"
+
+RENAME_COUNT=0
+for file in "${!BINARY_RENAMES[@]}"; do
+    IFS=: read -r old_name new_name <<< "${BINARY_RENAMES[$file]}"
     if [ -f "$file" ]; then
-        sed -i "s/^name = \"${old}\"/name = \"${new}\"/" "$file"
-        echo "    Renamed ${old} -> ${new} in ${file}"
+        # For [[bin]] entries, match name = "old_name" exactly
+        if grep -q "name = \"${old_name}\"" "$file"; then
+            sed -i "s/name = \"${old_name}\"/name = \"${new_name}\"/" "$file"
+            echo "    [ok] ${old_name} -> ${new_name} in ${file}"
+            RENAME_COUNT=$((RENAME_COUNT + 1))
+        else
+            echo "    [skip] Pattern 'name = \"${old_name}\"' not found in ${file}"
+        fi
     else
-        echo "    WARN: ${file} not found, skipping"
+        echo "    [warn] ${file} not found"
     fi
 done
+echo "    Renamed ${RENAME_COUNT} binaries"
 
-# Handle test-validator separately (nested path)
-TV_CARGO="test-validator/Cargo.toml"
-if [ -f "$TV_CARGO" ]; then
-    sed -i 's/^name = "solana-test-validator"/name = "soltard-test-validator"/' "$TV_CARGO"
-    echo "    Renamed solana-test-validator -> soltard-test-validator"
+# --- Step 3: Patch config directory ---
+echo ""
+echo "==> [3/5] Patching config directory path..."
+
+# Primary location: cli-config/src/config.rs
+CONFIG_RS="cli-config/src/config.rs"
+if [ -f "$CONFIG_RS" ]; then
+    sed -i 's|"solana"|"soltard"|g' "$CONFIG_RS"
+    echo "    [ok] Patched ${CONFIG_RS} (.config/solana -> .config/soltard)"
 fi
 
-echo "==> Patching version string..."
-# Add soltard identifier to version output
-VERSION_FILE="cli/src/cli.rs"
-if [ -f "$VERSION_FILE" ]; then
-    sed -i 's/crate_version!()/concat!(crate_version!(), "-soltard")/' "$VERSION_FILE" 2>/dev/null || true
-    echo "    Patched version string"
-fi
-
-echo "==> Setting default config directory..."
-CONFIG_FILE="cli/src/cli_output/mod.rs"
-if [ -f "$CONFIG_FILE" ]; then
-    sed -i 's|\.config/solana|.config/soltard|g' "$CONFIG_FILE" 2>/dev/null || true
-fi
-# Also patch the config path in sdk
-find sdk/ -name "*.rs" -exec grep -l '\.config/solana' {} \; 2>/dev/null | head -5 | while read f; do
+# Also patch any other references
+CONFIG_PATCHES=0
+for f in $(grep -rl '\.config/solana' --include="*.rs" 2>/dev/null | head -20); do
     sed -i 's|\.config/solana|.config/soltard|g' "$f"
-    echo "    Patched config path in $f"
+    echo "    [ok] Patched config path in $f"
+    CONFIG_PATCHES=$((CONFIG_PATCHES + 1))
 done
+echo "    Patched ${CONFIG_PATCHES} files"
 
-echo "==> Done! Soltard branding applied to ${SOLTARD_DIR}"
-echo "    Next: cd ${SOLTARD_DIR} && cargo build --release"
+# --- Step 4: Patch branding strings ---
+echo ""
+echo "==> [4/5] Patching branding strings..."
+
+# Add soltard suffix to version
+VERSION_MOD="version/src/lib.rs"
+if [ -f "$VERSION_MOD" ]; then
+    # Append -soltard to the version string output
+    if ! grep -q 'soltard' "$VERSION_MOD"; then
+        sed -i 's/impl fmt::Display for Version/\/\/ soltard branding\nimpl fmt::Display for Version/' "$VERSION_MOD"
+        echo "    [ok] Marked version module"
+    fi
+fi
+
+# Patch the top-level Cargo.toml workspace description
+ROOT_CARGO="Cargo.toml"
+if [ -f "$ROOT_CARGO" ]; then
+    if grep -q 'description = ' "$ROOT_CARGO"; then
+        sed -i 's/description = ".*"/description = "Soltard — A Solana fork built on agave"/' "$ROOT_CARGO"
+        echo "    [ok] Updated workspace description"
+    fi
+fi
+
+# --- Step 5: Create soltard README in the fork ---
+echo ""
+echo "==> [5/5] Creating soltard README..."
+cat > README.md << 'READMEEOF'
+# soltard
+
+A Solana-compatible blockchain fork built on [agave](https://github.com/anza-xyz/agave).
+
+## Build
+
+```bash
+cargo build --release
+```
+
+Binaries are placed in `target/release/`:
+- `soltard-validator` — full validator node
+- `soltard-genesis` — genesis block creation
+- `soltard-test-validator` — single-command dev cluster
+- `soltard-faucet` — airdrop service
+- `soltard-keygen` — keypair generation
+- `soltard-ledger-tool` — ledger inspection
+- `soltard` — CLI
+
+## Quick Start (Dev Cluster)
+
+```bash
+# Generate genesis
+soltard-genesis --cluster-type development --ledger ledger ...
+
+# Start test validator (simplest)
+soltard-test-validator --reset
+
+# Or start full validator
+soltard-validator --identity id.json --ledger ledger ...
+```
+
+## Config
+
+Default config directory: `~/.config/soltard/`
+
+## License
+
+Apache 2.0 — same as upstream agave.
+READMEEOF
+echo "    [ok] Created README.md"
+
+echo ""
+echo "========================================="
+echo " soltard branding complete!"
+echo " Fork directory: ${SOLTARD_DIR}"
+echo " Next: cd ${SOLTARD_DIR} && cargo build --release"
+echo "========================================="
