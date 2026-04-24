@@ -1,8 +1,8 @@
 -- supabase-setup.sql — Soltard cluster monitoring schema
 -- Target: Supabase project jfgolkmphrsylthfjrpv (us-east-1)
 --
--- STATUS: STUB — Phase 3 implementation pending
--- Run against Supabase SQL editor or via psql
+-- Applied to Supabase project jfgolkmphrsylthfjrpv via REST API
+-- Tables: cluster_info, validator_status, epoch_history
 
 -- Cluster info: tracks the running soltard cluster
 CREATE TABLE IF NOT EXISTS cluster_info (

@@ -1,49 +1,85 @@
-# ITACHI_REPORT: soltard research & bootstrap
+# ITACHI_REPORT: soltard Phase 2+3 execution
 
 ## status: pass
 
 ## summary
-Researched three Solana fork bases (agave, jito-solana, firedancer), selected agave as the fork base, documented the full validator bringup sequence, outlined the minimum branding diff, scaffolded the repo with scripts and docs, created a Supabase project, and pushed to GitHub.
+Built the full soltard fork from source (agave v2.2.6), launched a working dev cluster on cool (Hetzner VPS), confirmed slots advancing, and wired Supabase monitoring with a cron job writing validator status every 60 seconds.
 
 ## criteria_results
 
 | Criteria | Status | Details |
 |----------|--------|---------|
-| Survey fork bases | pass | Evaluated agave, jito-solana, firedancer with detailed comparison |
-| Pick fork base with rationale | pass | agave selected — complete toolchain, Apache 2.0, largest community, easiest to fork |
-| Map validator bringup sequence | pass | Full sequence documented: keypairs -> genesis -> validator -> faucet -> CLI verify |
-| Outline minimum branding diff | pass | 3-tier plan: essential (genesis/binaries), branding (CLI/config), optional (crate renames) |
-| Scaffold repo | pass | docs/, scripts/, config/ with clone-and-brand.sh, genesis.sh, start-validator.sh |
-| Supabase project | pass | Created "soltard" (id: jfgolkmphrsylthfjrpv) under pumpcaster@proton.me org (us-east-1) |
-| GitHub repo | pass | Pushed to ItachiDevv/soltard branch task/research-bootstrap-new |
+| Rust toolchain | pass | rustc 1.95.0 installed via rustup |
+| clone-and-brand.sh | pass | Branded 7 binaries in agave-fork/ |
+| cargo build --release | pass | All 7 binaries built in 41m 13s |
+| genesis.sh | pass | Genesis hash: SbB6y2TNzRfep3CnC2SGvAXKh3wkxBLUSDSE793Txi3 |
+| dev-cluster.sh | pass | soltard-test-validator running, RPC healthy on :8899 |
+| health-check.sh | pass | 66 slots advanced in 30 seconds |
+| stop-cluster.sh | pass | Graceful shutdown with PID tracking |
+| Supabase SQL applied | pass | Tables exist: cluster_info, validator_status, epoch_history |
+| report-status.sh | pass | Writes slot/block/epoch/health to Supabase |
+| Cron job | pass | Every 60s, data confirmed flowing |
+| Supabase verification | pass | cluster_info: 1 row, validator_status: 68+ rows, epoch_history: 1 row |
 
-## deliverables
+## build binary paths and sizes
 
-- **Research docs**: `docs/01-fork-base-decision.md`, `docs/02-validator-bringup-sequence.md`, `docs/03-minimum-branding-diff.md`
-- **Scripts**: `scripts/clone-and-brand.sh` (clone agave + apply branding), `scripts/genesis.sh` (generate genesis block), `scripts/start-validator.sh` (start dev cluster)
-- **Supabase**: Project `soltard` (jfgolkmphrsylthfjrpv) in pumpcaster@proton.me org
-- **GitHub**: https://github.com/ItachiDevv/soltard (branch: task/research-bootstrap-new)
+```
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard           35M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-faucet     16M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-genesis    28M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-keygen    2.7M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-ledger-tool 58M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-test-validator 70M
+/home/itachi/soltard-execute-phase-2/agave-fork/target/release/soltard-validator  72M
+```
 
-## decision: fork base
+## RPC health response
 
-**agave** (anza-xyz/agave, formerly solana-labs/solana)
+```json
+{"jsonrpc":"2.0","result":"ok","id":1}
+```
 
-Why not jito-solana: Adds MEV complexity we don't need, always behind upstream, external service dependencies.
-Why not firedancer: Written in C (not Rust), missing CLI/faucet/test-validator tooling, much smaller community.
+## slot advance log
 
-## next steps (phase 2)
+```
+Initial slot: 0
+Final slot: 66
+Slots advanced: 66 in 30s
+HEALTH CHECK PASSED
+```
 
-1. Run `clone-and-brand.sh` to actually clone agave and apply branding
-2. Build the fork (`cargo build --release` — needs beefy machine, ~30min)
-3. Run genesis.sh and start-validator.sh to verify the dev cluster boots
-4. Merge task/research-bootstrap-new to main
-5. Set up CI/CD for automated builds
-6. Design Supabase schema for cluster metadata/monitoring
+## cron output (report-status.log)
+
+```
+2026-04-24T10:19:02Z | slot=189 block=189 epoch=0 healthy=true version=2.2.6
+2026-04-24T10:20:02Z | slot=337 block=337 epoch=0 healthy=true version=2.2.6
+2026-04-24T10:21:02Z | slot=485 block=485 epoch=0 healthy=true version=2.2.6
+```
+
+## Supabase table counts
+
+```
+cluster_info:      1 row
+validator_status: 68 rows (growing every 60s)
+epoch_history:     1 row
+```
+
+## Supabase sample data (validator_status latest 5)
+
+```json
+[
+  {"id":68,"slot":631,"block_height":631,"is_healthy":true,"recorded_at":"2026-04-24T10:22:01.88869+00:00"},
+  {"id":67,"slot":485,"block_height":485,"is_healthy":true,"recorded_at":"2026-04-24T10:21:02.773358+00:00"},
+  {"id":66,"slot":337,"block_height":337,"is_healthy":true,"recorded_at":"2026-04-24T10:20:02.354653+00:00"},
+  {"id":65,"slot":189,"block_height":189,"is_healthy":true,"recorded_at":"2026-04-24T10:19:01.992137+00:00"},
+  {"id":64,"slot":90,"block_height":90,"is_healthy":true,"recorded_at":"2026-04-24T10:18:21.779268+00:00"}
+]
+```
 
 ## learned
 
-- agave is the clear choice for any Solana fork — it's the only option that includes the complete toolchain (validator + RPC + CLI + faucet + test-validator + genesis) in one repo
-- Firedancer is impressive for performance but impractical as a fork base due to missing dev tooling and C language mismatch with the Solana ecosystem
-- The minimum viable branding diff for a Solana fork is ~50-100 lines: binary renames in Cargo.toml, custom genesis params, config directory path, version string
-- Genesis hash uniqueness comes automatically from parameter changes — no need to modify hashing code
-- Supabase Management API requires organization_id, not just the access token — must list orgs first
+- agave cargo build with CARGO_BUILD_JOBS=2 completes in ~41 min on a 4-core/8GB Hetzner VPS
+- soltard-test-validator is the easiest way to run a dev cluster (includes faucet, genesis, RPC)
+- Port conflicts (faucet :9900) require cleanup of stray processes before restart
+- The Supabase REST API works well for cron-based monitoring without needing the CLI
+- Background cargo builds in sandboxed shells need explicit PATH (no $HOME/.cargo/env)
