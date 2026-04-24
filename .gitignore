@@ -4,11 +4,12 @@ agave-fork/
 
 # Keypairs (NEVER commit private keys)
 config/*-keypair.json
+config/*.json
 
 # Ledger data
 config/bootstrap-validator-ledger/
-config/test-ledger/
 config/logs/
+test-ledger/
 
 # Environment
 .env

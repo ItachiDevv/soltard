@@ -7,6 +7,9 @@ CONFIG_DIR="${SCRIPT_DIR}/../config"
 LEDGER_DIR="${CONFIG_DIR}/bootstrap-validator-ledger"
 LOG_DIR="${CONFIG_DIR}/logs"
 
+FORK_BIN="${SCRIPT_DIR}/../agave-fork/target/release"
+export PATH="${FORK_BIN}:${PATH}"
+
 mkdir -p "$LOG_DIR"
 
 if [ ! -d "$LEDGER_DIR" ]; then
@@ -15,7 +18,7 @@ if [ ! -d "$LEDGER_DIR" ]; then
 fi
 
 echo "==> Starting soltard validator..."
-solana-validator \
+soltard-validator \
     --identity "${CONFIG_DIR}/validator-keypair.json" \
     --vote-account "${CONFIG_DIR}/vote-keypair.json" \
     --ledger "$LEDGER_DIR" \
@@ -33,7 +36,7 @@ VALIDATOR_PID=$!
 echo "    Validator PID: ${VALIDATOR_PID}"
 
 echo "==> Starting faucet..."
-solana-faucet \
+soltard-faucet \
     --keypair "${CONFIG_DIR}/faucet-keypair.json" \
     --per-time-cap 1000 \
     --per-request-cap 100 &
@@ -45,14 +48,14 @@ echo "==> Waiting for validator to initialize..."
 sleep 5
 
 echo "==> Configuring CLI..."
-solana config set --url http://localhost:8899 --keypair "${CONFIG_DIR}/mint-keypair.json"
+soltard config set --url http://localhost:8899 --keypair "${CONFIG_DIR}/mint-keypair.json"
 
 echo "==> Health check..."
 for i in $(seq 1 10); do
-    if solana cluster-version 2>/dev/null; then
+    if soltard cluster-version 2>/dev/null; then
         echo "    Cluster is healthy!"
-        solana slot
-        solana block-height
+        soltard slot
+        soltard block-height
         break
     fi
     echo "    Waiting... (attempt ${i}/10)"

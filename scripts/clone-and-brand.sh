@@ -8,7 +8,8 @@
 #   3. Patches the config directory path (.config/solana -> .config/soltard)
 #   4. Patches version/branding strings
 #
-# The result is a buildable soltard fork with a unique identity.
+# IMPORTANT: Only [[bin]] names are changed. [package] names stay intact
+# to avoid breaking workspace dependency resolution.
 set -euo pipefail
 
 AGAVE_REPO="https://github.com/anza-xyz/agave.git"
@@ -35,53 +36,113 @@ cd "$SOLTARD_DIR"
 
 # --- Step 2: Rename binaries ---
 echo ""
-echo "==> [2/5] Renaming binaries in Cargo.toml files..."
-
-# In agave v2.2.6, some binaries are already "agave-*", some are "solana-*"
-# We rename all to "soltard-*"
-declare -A BINARY_RENAMES=(
-    # file:old_name -> new_name
-    ["validator/Cargo.toml"]="agave-validator:soltard-validator"
-    ["genesis/Cargo.toml"]="solana-genesis:soltard-genesis"
-    ["faucet/Cargo.toml"]="solana-faucet:soltard-faucet"
-    ["keygen/Cargo.toml"]="solana-keygen:soltard-keygen"
-    ["ledger-tool/Cargo.toml"]="agave-ledger-tool:soltard-ledger-tool"
-    ["test-validator/Cargo.toml"]="solana-test-validator:soltard-test-validator"
-)
-
-# The CLI binary (cli/Cargo.toml) has [[bin]] name = "solana"
-BINARY_RENAMES["cli/Cargo.toml"]="solana:soltard"
+echo "==> [2/5] Renaming binary names (keeping crate/package names intact)..."
 
 RENAME_COUNT=0
-for file in "${!BINARY_RENAMES[@]}"; do
-    IFS=: read -r old_name new_name <<< "${BINARY_RENAMES[$file]}"
+
+# Group A: Crates WITH explicit [[bin]] sections — only rename inside [[bin]]
+# These have [package] name != [[bin]] name or same name but separate entry
+declare -A BIN_SECTION_RENAMES=(
+    ["faucet/Cargo.toml"]="solana-faucet:soltard-faucet"
+    ["genesis/Cargo.toml"]="solana-genesis:soltard-genesis"
+    ["keygen/Cargo.toml"]="solana-keygen:soltard-keygen"
+    ["cli/Cargo.toml"]="solana:soltard"
+)
+
+for file in "${!BIN_SECTION_RENAMES[@]}"; do
+    IFS=: read -r old_name new_name <<< "${BIN_SECTION_RENAMES[$file]}"
     if [ -f "$file" ]; then
-        # For [[bin]] entries, match name = "old_name" exactly
-        if grep -q "name = \"${old_name}\"" "$file"; then
-            sed -i "s/name = \"${old_name}\"/name = \"${new_name}\"/" "$file"
-            echo "    [ok] ${old_name} -> ${new_name} in ${file}"
+        python3 -c "
+import re, sys
+with open('$file') as f:
+    content = f.read()
+# Split on [[bin]] markers to only modify bin sections
+parts = re.split(r'(\[\[bin\]\])', content)
+changed = False
+for i, part in enumerate(parts):
+    if part == '[[bin]]' and i+1 < len(parts):
+        old = 'name = \"${old_name}\"'
+        new = 'name = \"${new_name}\"'
+        if old in parts[i+1]:
+            parts[i+1] = parts[i+1].replace(old, new, 1)
+            changed = True
+if changed:
+    with open('$file', 'w') as f:
+        f.write(''.join(parts))
+    sys.exit(0)
+sys.exit(1)
+" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "    [ok] [[bin]] ${old_name} -> ${new_name} in ${file}"
             RENAME_COUNT=$((RENAME_COUNT + 1))
         else
-            echo "    [skip] Pattern 'name = \"${old_name}\"' not found in ${file}"
+            echo "    [skip] No [[bin]] name = \"${old_name}\" in ${file}"
         fi
     else
         echo "    [warn] ${file} not found"
     fi
 done
-echo "    Renamed ${RENAME_COUNT} binaries"
+
+# Group B: Crates WITHOUT [[bin]] sections — binary name = package name
+# Add explicit [[bin]] sections with new names and disable auto-discovery
+
+# validator crate has 2 binaries: agave-validator (main.rs) + solana-test-validator (src/bin/)
+VALIDATOR_TOML="validator/Cargo.toml"
+if [ -f "$VALIDATOR_TOML" ] && ! grep -q '\[\[bin\]\]' "$VALIDATOR_TOML"; then
+    # Add autobins = false under [package]
+    sed -i '/^\[package\]$/a autobins = false' "$VALIDATOR_TOML"
+    cat >> "$VALIDATOR_TOML" << 'EOF'
+
+[[bin]]
+name = "soltard-validator"
+path = "src/main.rs"
+
+[[bin]]
+name = "soltard-test-validator"
+path = "src/bin/solana-test-validator.rs"
+EOF
+    echo "    [ok] Added [[bin]] soltard-validator + soltard-test-validator in ${VALIDATOR_TOML}"
+    RENAME_COUNT=$((RENAME_COUNT + 2))
+fi
+
+# ledger-tool crate has 1 binary: agave-ledger-tool (main.rs)
+LEDGER_TOML="ledger-tool/Cargo.toml"
+if [ -f "$LEDGER_TOML" ] && ! grep -q '\[\[bin\]\]' "$LEDGER_TOML"; then
+    cat >> "$LEDGER_TOML" << 'EOF'
+
+[[bin]]
+name = "soltard-ledger-tool"
+path = "src/main.rs"
+EOF
+    echo "    [ok] Added [[bin]] soltard-ledger-tool in ${LEDGER_TOML}"
+    RENAME_COUNT=$((RENAME_COUNT + 1))
+fi
+
+# Fix default-run references
+for file in $(grep -rl 'default-run' --include="Cargo.toml" 2>/dev/null); do
+    if grep -q 'default-run = "agave-validator"' "$file"; then
+        sed -i 's/default-run = "agave-validator"/default-run = "soltard-validator"/' "$file"
+        echo "    [ok] default-run: agave-validator -> soltard-validator in ${file}"
+    fi
+    if grep -q 'default-run = "agave-ledger-tool"' "$file"; then
+        sed -i 's/default-run = "agave-ledger-tool"/default-run = "soltard-ledger-tool"/' "$file"
+        echo "    [ok] default-run: agave-ledger-tool -> soltard-ledger-tool in ${file}"
+    fi
+done
+
+echo "    Renamed/added ${RENAME_COUNT} binary entries"
 
 # --- Step 3: Patch config directory ---
 echo ""
 echo "==> [3/5] Patching config directory path..."
 
-# Primary location: cli-config/src/config.rs
 CONFIG_RS="cli-config/src/config.rs"
 if [ -f "$CONFIG_RS" ]; then
-    sed -i 's|"solana"|"soltard"|g' "$CONFIG_RS"
-    echo "    [ok] Patched ${CONFIG_RS} (.config/solana -> .config/soltard)"
+    # Only patch the config dir name, not all "solana" strings
+    sed -i 's|\.config/solana|.config/soltard|g' "$CONFIG_RS"
+    echo "    [ok] Patched ${CONFIG_RS}"
 fi
 
-# Also patch any other references
 CONFIG_PATCHES=0
 for f in $(grep -rl '\.config/solana' --include="*.rs" 2>/dev/null | head -20); do
     sed -i 's|\.config/solana|.config/soltard|g' "$f"
@@ -94,17 +155,6 @@ echo "    Patched ${CONFIG_PATCHES} files"
 echo ""
 echo "==> [4/5] Patching branding strings..."
 
-# Add soltard suffix to version
-VERSION_MOD="version/src/lib.rs"
-if [ -f "$VERSION_MOD" ]; then
-    # Append -soltard to the version string output
-    if ! grep -q 'soltard' "$VERSION_MOD"; then
-        sed -i 's/impl fmt::Display for Version/\/\/ soltard branding\nimpl fmt::Display for Version/' "$VERSION_MOD"
-        echo "    [ok] Marked version module"
-    fi
-fi
-
-# Patch the top-level Cargo.toml workspace description
 ROOT_CARGO="Cargo.toml"
 if [ -f "$ROOT_CARGO" ]; then
     if grep -q 'description = ' "$ROOT_CARGO"; then

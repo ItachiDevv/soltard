@@ -27,10 +27,16 @@ SOLTARD_TICKS_PER_SLOT="${SOLTARD_TICKS_PER_SLOT:-64}"
 SOLTARD_HASHES_PER_TICK="${SOLTARD_HASHES_PER_TICK:-auto}"
 SOLTARD_MAX_GENESIS_ARCHIVE="${SOLTARD_MAX_GENESIS_ARCHIVE:-1073741824}"
 
-# Detect binary names (prefer soltard-* if available, fallback to solana-*)
-KEYGEN="$(command -v soltard-keygen 2>/dev/null || command -v solana-keygen 2>/dev/null || echo solana-keygen)"
-GENESIS="$(command -v soltard-genesis 2>/dev/null || command -v solana-genesis 2>/dev/null || echo solana-genesis)"
-LEDGER_TOOL="$(command -v soltard-ledger-tool 2>/dev/null || command -v solana-ledger-tool 2>/dev/null || echo solana-ledger-tool)"
+# Detect binary names (prefer built soltard-* from agave-fork, fallback to PATH)
+FORK_BIN="${SCRIPT_DIR}/../agave-fork/target/release"
+KEYGEN="${FORK_BIN}/soltard-keygen"
+GENESIS="${FORK_BIN}/soltard-genesis"
+LEDGER_TOOL="${FORK_BIN}/soltard-ledger-tool"
+if [ ! -x "$KEYGEN" ]; then
+    KEYGEN="$(command -v soltard-keygen 2>/dev/null || command -v solana-keygen 2>/dev/null || echo solana-keygen)"
+    GENESIS="$(command -v soltard-genesis 2>/dev/null || command -v solana-genesis 2>/dev/null || echo solana-genesis)"
+    LEDGER_TOOL="$(command -v soltard-ledger-tool 2>/dev/null || command -v solana-ledger-tool 2>/dev/null || echo solana-ledger-tool)"
+fi
 
 mkdir -p "$CONFIG_DIR"
 
@@ -56,7 +62,6 @@ rm -rf "$LEDGER_DIR"
 $GENESIS \
     --cluster-type "$SOLTARD_CLUSTER_TYPE" \
     --ledger "$LEDGER_DIR" \
-    --mint "${CONFIG_DIR}/mint-keypair.json" \
     --bootstrap-validator \
         "${CONFIG_DIR}/validator-keypair.json" \
         "${CONFIG_DIR}/vote-keypair.json" \
