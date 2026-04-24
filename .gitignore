@@ -9,6 +9,7 @@ config/*.json
 # Ledger data
 config/bootstrap-validator-ledger/
 config/logs/
+config/pids/
 test-ledger/
 
 # Environment
