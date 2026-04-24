@@ -1,0 +1,26 @@
+# Build artifacts
+target/
+agave-fork/
+
+# Keypairs (NEVER commit private keys)
+config/*-keypair.json
+
+# Ledger data
+config/bootstrap-validator-ledger/
+config/test-ledger/
+config/logs/
+
+# Environment
+.env
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
